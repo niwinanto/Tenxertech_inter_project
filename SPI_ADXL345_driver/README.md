@@ -4,7 +4,7 @@ ADXL345 is an accelerometer from Analog Devices. This program uses python spidev
 
 
 ## ADXL345 Interrupt detection  
-We have used Adafruit Python GPIO Library which provide a cross-platform GPIO interface on the Raspberry Pi. Using this library we Programed one of the GPIO pins(**PWM1**) in CHIP Pro to detect the edge triggering. We have connected interrupt pin of ADXL345 to this GPIO pin and wrote a handler to do the required actions while changing the ADXL345 interrupt line. The ADXL345 interrupt line is programed to change state when ever FIFO samples overflows.  
+We have used Adafruit Python GPIO Library which provide a cross-platform GPIO interface on the Raspberry Pi. Using this library we programed one of the GPIO pins(**PWM1**) in CHIP Pro to detect the edge triggering. We have connected interrupt pin of ADXL345 to this GPIO pin and wrote a handler to do the required actions while changing the ADXL345 interrupt line. The ADXL345 interrupt line is programed to change state when ever FIFO samples overflows.  
 
 ## Hardware Pin Mapping 
 |ADXL345        |  CHIP Pro     |
