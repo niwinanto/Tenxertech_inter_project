@@ -1,2 +1,2 @@
-# Tenxertech_inter_project
-IIIT B intership program with Tenxertech.
+# Enabling DMA in SPI controller
+The CHIP Pro uses allwinner A10 based SOM called GR8. The SPI controller in this module supports DMA. Here a driver for the SPI controller is used with DMA enabled. The corresponding changes are made in the device tree files. The driver is compiled with [NextThingCo](https://github.com/NextThingCo/linux) linux fork (kernel 4.4.30). Replace the driver in drivers/spi/spi-sun4i.c 
