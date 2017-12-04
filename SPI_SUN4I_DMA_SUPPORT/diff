@@ -1,0 +1,1005 @@
+13,15d12
+< #define MY_DEBUG 0
+< #define MY_DMA_DEBUG 1
+< #define DEBUG_ME(test_routine) printk(KERN_INFO "SPI SUN4I DMA DRIVER inside %s\n", #test_routine)
+20,21d16
+< #include <linux/dmaengine.h>
+< #include <linux/dma-mapping.h>
+27,28d21
+< #include <linux/reset.h>
+< #include <linux/of.h>
+32,87c25
+< /*
+<  * On spi2 on A10s transfer times out when transferring more than 63 bytes.
+<  * On spi0 on H3 transfer times out when transferring more than 68 bytes.
+<  * Theoretically the FIFO size is 64 and 128 bytes but usable size is lower.
+<  */
+< #define SUN4I_FIFO_DEPTH		63
+< #define SUN6I_FIFO_DEPTH		68
+< 
+< #define SUNXI_TFR_CTL_CS(bitmap, cs)	(((cs) << \
+< 					  (bitmap)[SUNXI_TFR_CTL_CS_SHIFT]) \
+< 					 & (bitmap)[SUNXI_TFR_CTL_CS_MASK])
+< 
+< #define SUNXI_CNT_MASK			0xffffff
+< #define SUNXI_XMIT_CNT(cnt)		((cnt) & SUNXI_CNT_MASK)
+< #define SUNXI_BURST_CNT(cnt)		((cnt) & SUNXI_CNT_MASK)
+< #define SUNXI_BURST_CTL_CNT_STC(cnt)	((cnt) & SUNXI_CNT_MASK)
+< 
+< #define SUNXI_CLK_CTL_DRS		BIT(12)
+< #define SUNXI_CLK_CTL_CDR2_MASK		0xff
+< #define SUNXI_CLK_CTL_CDR2(div)		(((div) & SUNXI_CLK_CTL_CDR2_MASK) << 0)
+< #define SUNXI_CLK_CTL_CDR1_MASK		0xf
+< #define SUNXI_CLK_CTL_CDR1(div)		(((div) & SUNXI_CLK_CTL_CDR1_MASK) << 8)
+< 
+< #define SUNXI_FIFO_STA_RF_CNT_MASK	0x7f
+< #define SUNXI_FIFO_STA_RF_CNT_BITS	0
+< #define SUNXI_FIFO_STA_TF_CNT_MASK	0x7f
+< #define SUNXI_FIFO_STA_TF_CNT_BITS	16
+< 
+< static int wait_for_dma = 1;
+< module_param(wait_for_dma, int, 0644);
+< MODULE_PARM_DESC(wait_for_dma,
+< 		 "When acquiring a DMA channel returns EDEFER return and let kernel defer spi master probe.\n"
+< 		 "Non-DMA operation is used otherwise (defaults to wait for DMA driver to load).");
+< 
+< enum SPI_SUNXI_TYPE {
+< 	SPI_SUN4I = 1,
+< 	SPI_SUN6I,
+< };
+< 
+< enum SUNXI_REG_ENUM {
+< 	SUNXI_RXDATA_REG,
+< 	SUNXI_TXDATA_REG,
+< 	SUNXI_TFR_CTL_REG,
+< 	SUNXI_INT_CTL_REG,
+< 	SUNXI_INT_STA_REG,
+< 	SUNXI_DMA_CTL_REG,
+< 	SUNXI_WAIT_REG,
+< 	SUNXI_CLK_CTL_REG,
+< 	SUNXI_BURST_CNT_REG,
+< 	SUNXI_XMIT_CNT_REG,
+< 	SUNXI_FIFO_STA_REG,
+< 	SUNXI_GBL_CTL_REG,
+< 	SUNXI_FIFO_CTL_REG,
+< 	SUNXI_BURST_CTL_CNT_REG,
+< 	SUNXI_NUM_REGS
+< };
+---
+> #define SUN4I_FIFO_DEPTH		64
+89,102c27
+< static int sun4i_regmap[SUNXI_NUM_REGS] = {
+< /* SUNXI_RXDATA_REG */			0x00,
+< /* SUNXI_TXDATA_REG */			0x04,
+< /* SUNXI_TFR_CTL_REG */			0x08,
+< /* SUNXI_INT_CTL_REG */			0x0c,
+< /* SUNXI_INT_STA_REG */			0x10,
+< /* SUNXI_DMA_CTL_REG */			0x14,
+< /* SUNXI_WAIT_REG */			0x18,
+< /* SUNXI_CLK_CTL_REG */			0x1c,
+< /* SUNXI_BURST_CNT_REG */		0x20,
+< /* SUNXI_XMIT_CNT_REG */		0x24,
+< /* SUNXI_FIFO_STA_REG */		0x28,
+< -1, -1, -1,
+< };
+---
+> #define SUN4I_RXDATA_REG		0x00
+104,119c29
+< static int sun6i_regmap[SUNXI_NUM_REGS] = {
+< /* SUNXI_RXDATA_REG */			0x300,
+< /* SUNXI_TXDATA_REG */			0x200,
+< /* SUNXI_TFR_CTL_REG */			0x08,
+< /* SUNXI_INT_CTL_REG */			0x10,
+< /* SUNXI_INT_STA_REG */			0x14,
+< /* SUNXI_DMA_CTL_REG */			-1,
+< /* SUNXI_WAIT_REG */			0x20,
+< /* SUNXI_CLK_CTL_REG */			0x24,
+< /* SUNXI_BURST_CNT_REG */		0x30,
+< /* SUNXI_XMIT_CNT_REG */		0x34,
+< /* SUNXI_FIFO_STA_REG */		0x1c,
+< /* SUNXI_GBL_CTL_REG */			0x04,
+< /* SUNXI_FIFO_CTL_REG */		0x18,
+< /* SUNXI_BURST_CTL_CNT_REG */		0x38,
+< };
+---
+> #define SUN4I_TXDATA_REG		0x04
+121,143c31,79
+< enum SUNXI_BITMAP_ENUM {
+< 	SUNXI_CTL_ENABLE,
+< 	SUNXI_CTL_MASTER,
+< 	SUNXI_TFR_CTL_CPHA,
+< 	SUNXI_TFR_CTL_CPOL,
+< 	SUNXI_TFR_CTL_CS_ACTIVE_LOW,
+< 	SUNXI_CTL_DMA_DEDICATED,
+< 	SUNXI_TFR_CTL_FBS,
+< 	SUNXI_CTL_TF_RST,
+< 	SUNXI_CTL_RF_RST,
+< 	SUNXI_TFR_CTL_XCH,
+< 	SUNXI_TFR_CTL_CS_MASK,
+< 	SUNXI_TFR_CTL_CS_SHIFT,
+< 	SUNXI_TFR_CTL_DHB,
+< 	SUNXI_TFR_CTL_CS_MANUAL,
+< 	SUNXI_TFR_CTL_CS_LEVEL,
+< 	SUNXI_CTL_TP,
+< 	SUNXI_INT_CTL_TC,
+< 	SUNXI_CTL_DMA_RF_READY,
+< 	SUNXI_CTL_DMA_TF_NOT_FULL,
+< 	SUNXI_CTL_DMA_TF_HALF,
+< 	SUNXI_BITMAP_SIZE
+< };
+---
+> #define SUN4I_CTL_REG			0x08
+> #define SUN4I_CTL_ENABLE			BIT(0)
+> #define SUN4I_CTL_MASTER			BIT(1)
+> #define SUN4I_CTL_CPHA				BIT(2)
+> #define SUN4I_CTL_CPOL				BIT(3)
+> #define SUN4I_CTL_CS_ACTIVE_LOW			BIT(4)
+> #define SUN4I_CTL_LMTF				BIT(6)
+> #define SUN4I_CTL_TF_RST			BIT(8)
+> #define SUN4I_CTL_RF_RST			BIT(9)
+> #define SUN4I_CTL_XCH				BIT(10)
+> #define SUN4I_CTL_CS_MASK			0x3000
+> #define SUN4I_CTL_CS(cs)			(((cs) << 12) & SUN4I_CTL_CS_MASK)
+> #define SUN4I_CTL_DHB				BIT(15)
+> #define SUN4I_CTL_CS_MANUAL			BIT(16)
+> #define SUN4I_CTL_CS_LEVEL			BIT(17)
+> #define SUN4I_CTL_TP				BIT(18)
+> 
+> #define SUN4I_INT_CTL_REG		0x0c
+> #define SUN4I_INT_CTL_RF_F34			BIT(4)
+> #define SUN4I_INT_CTL_TF_E34			BIT(12)
+> #define SUN4I_INT_CTL_TC			BIT(16)
+> 
+> #define SUN4I_INT_STA_REG		0x10
+> 
+> #define SUN4I_DMA_CTL_REG		0x14
+> 
+> #define SUN4I_WAIT_REG			0x18
+> 
+> #define SUN4I_CLK_CTL_REG		0x1c
+> #define SUN4I_CLK_CTL_CDR2_MASK			0xff
+> #define SUN4I_CLK_CTL_CDR2(div)			((div) & SUN4I_CLK_CTL_CDR2_MASK)
+> #define SUN4I_CLK_CTL_CDR1_MASK			0xf
+> #define SUN4I_CLK_CTL_CDR1(div)			(((div) & SUN4I_CLK_CTL_CDR1_MASK) << 8)
+> #define SUN4I_CLK_CTL_DRS			BIT(12)
+> 
+> #define SUN4I_MAX_XFER_SIZE			0xffffff
+> 
+> #define SUN4I_BURST_CNT_REG		0x20
+> #define SUN4I_BURST_CNT(cnt)			((cnt) & SUN4I_MAX_XFER_SIZE)
+> 
+> #define SUN4I_XMIT_CNT_REG		0x24
+> #define SUN4I_XMIT_CNT(cnt)			((cnt) & SUN4I_MAX_XFER_SIZE)
+> 
+> 
+> #define SUN4I_FIFO_STA_REG		0x28
+> #define SUN4I_FIFO_STA_RF_CNT_MASK		0x7f
+> #define SUN4I_FIFO_STA_RF_CNT_BITS		0
+> #define SUN4I_FIFO_STA_TF_CNT_MASK		0x7f
+> #define SUN4I_FIFO_STA_TF_CNT_BITS		16
+145,202c81
+< static u32 sun4i_bitmap[SUNXI_BITMAP_SIZE] = {
+< /* SUNXI_CTL_ENABLE */			BIT(0),
+< /* SUNXI_CTL_MASTER */			BIT(1),
+< /* SUNXI_TFR_CTL_CPHA */		BIT(2),
+< /* SUNXI_TFR_CTL_CPOL */		BIT(3),
+< /* SUNXI_TFR_CTL_CS_ACTIVE_LOW */	BIT(4),
+< /* SUNXI_CTL_DMA_DEDICATED */		BIT(5),
+< /* SUNXI_TFR_CTL_FBS */			BIT(6),
+< /* SUNXI_CTL_TF_RST */			BIT(8),
+< /* SUNXI_CTL_RF_RST */			BIT(9),
+< /* SUNXI_TFR_CTL_XCH */			BIT(10),
+< /* SUNXI_TFR_CTL_CS_MASK */		0x3000,
+< /* SUNXI_TFR_CTL_CS_SHIFT */		12,
+< /* SUNXI_TFR_CTL_DHB */			BIT(15),
+< /* SUNXI_TFR_CTL_CS_MANUAL */		BIT(16),
+< /* SUNXI_TFR_CTL_CS_LEVEL */		BIT(17),
+< /* SUNXI_CTL_TP */			BIT(18),
+< /* SUNXI_INT_CTL_TC */			BIT(16),
+< /* SUNXI_CTL_DMA_RF_READY */		BIT(0),
+< /* SUNXI_CTL_DMA_TF_NOT_FULL */		BIT(10),
+< /* SUNXI_CTL_DMA_TF_HALF */		BIT(9),
+< };
+< 
+< static u32 sun6i_bitmap[SUNXI_BITMAP_SIZE] = {
+< /* SUNXI_CTL_ENABLE */			BIT(0),
+< /* SUNXI_CTL_MASTER */			BIT(1),
+< /* SUNXI_TFR_CTL_CPHA */		BIT(0),
+< /* SUNXI_TFR_CTL_CPOL */		BIT(1),
+< /* SUNXI_TFR_CTL_CS_ACTIVE_LOW */	BIT(2),
+< /*
+<  * Bit 9 is listed as dedicated dma control for rx.
+<  * There is no dedicated dma control bit listed for tx and bit 25
+<  * on the logical position is listed as unused.
+<  */
+< /* SUNXI_CTL_DMA_DEDICATED */		BIT(9)|BIT(25),
+< /* SUNXI_TFR_CTL_FBS */			BIT(12),
+< /* SUNXI_CTL_TF_RST */			BIT(31),
+< /* SUNXI_CTL_RF_RST */			BIT(15),
+< /* SUNXI_TFR_CTL_XCH */			BIT(31),
+< /* SUNXI_TFR_CTL_CS_MASK */		0x30,
+< /* SUNXI_TFR_CTL_CS_SHIFT */		4,
+< /* SUNXI_TFR_CTL_DHB */			BIT(8),
+< /* SUNXI_TFR_CTL_CS_MANUAL */		BIT(6),
+< /* SUNXI_TFR_CTL_CS_LEVEL */		BIT(7),
+< /* SUNXI_CTL_TP */			BIT(7),
+< /* SUNXI_INT_CTL_TC */			BIT(12),
+< /*
+<  * On sun4i there are separate bits enabling request on different fifo levels.
+<  * On sun6i there is a level field and enable bit which enables request on that
+<  * FIFO level. Only one level is ever used so just pack the relevant bits as
+<  * one constant.
+<  */
+< /* SUNXI_CTL_DMA_RF_READY */		BIT(0)|BIT(8),
+< /* SUNXI_CTL_DMA_TF_NOT_FULL */		(0x7f << 16)|BIT(24),
+< /* SUNXI_CTL_DMA_TF_HALF */		BIT(23)|BIT(24),
+< };
+< 
+< struct sunxi_spi {
+---
+> struct sun4i_spi {
+207,211d85
+< 	struct reset_control	*rstc;
+< 	int			(*regmap)[SUNXI_NUM_REGS];
+< 	u32			(*bitmap)[SUNXI_BITMAP_SIZE];
+< 	int			fifo_depth;
+< 	int			type;
+220c94
+< static inline u32 sspi_reg(struct sunxi_spi *sspi, enum SUNXI_REG_ENUM name)
+---
+> static inline u32 sun4i_spi_read(struct sun4i_spi *sspi, u32 reg)
+222,228c96
+< #if MY_DEBUG
+<     DEBUG_ME(sspi_reg);
+< #endif
+< 	if ((name >= SUNXI_NUM_REGS) || (name < 0) ||
+< 	    ((*sspi->regmap)[name] < 0))
+< 		dev_err(&sspi->master->dev, "Register remap error\n");
+< 	return (*sspi->regmap)[name];
+---
+> 	return readl(sspi->base_addr + reg);
+231,232c99
+< static inline u32 sunxi_spi_read(struct sunxi_spi *sspi,
+< 				 enum SUNXI_REG_ENUM name)
+---
+> static inline void sun4i_spi_write(struct sun4i_spi *sspi, u32 reg, u32 value)
+234,237c101
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_read);
+< #endif
+< 	return readl(sspi->base_addr + sspi_reg(sspi, name));
+---
+> 	writel(value, sspi->base_addr + reg);
+240,241c104
+< static inline void sunxi_spi_write(struct sunxi_spi *sspi,
+< 				   enum SUNXI_REG_ENUM name, u32 value)
+---
+> static inline u32 sun4i_spi_get_tx_fifo_count(struct sun4i_spi *sspi)
+243,247c106
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_write);
+< #endif
+< 	writel(value, sspi->base_addr + sspi_reg(sspi, name));
+< }
+---
+> 	u32 reg = sun4i_spi_read(sspi, SUN4I_FIFO_STA_REG);
+249,258c108,110
+< static inline u32 sspi_bits(struct sunxi_spi *sspi,
+< 			    enum SUNXI_BITMAP_ENUM name)
+< {
+< #if MY_DEBUG
+<     DEBUG_ME(sspi_bits);
+< #endif
+< 	if ((name >= SUNXI_BITMAP_SIZE) || (name < 0) ||
+< 	    ((*sspi->bitmap)[name] <= 0U))
+< 		dev_err(&sspi->master->dev, "Register bits remap error\n");
+< 	return (*sspi->bitmap)[name];
+---
+> 	reg >>= SUN4I_FIFO_STA_TF_CNT_BITS;
+> 
+> 	return reg & SUN4I_FIFO_STA_TF_CNT_MASK;
+261c113
+< static inline void sunxi_spi_set(struct sunxi_spi *sspi, u32 reg, u32 value)
+---
+> static inline void sun4i_spi_enable_interrupt(struct sun4i_spi *sspi, u32 mask)
+263,266c115
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_set);
+< #endif
+< 	u32 orig = sunxi_spi_read(sspi, reg);
+---
+> 	u32 reg = sun4i_spi_read(sspi, SUN4I_INT_CTL_REG);
+268c117,118
+< 	sunxi_spi_write(sspi, reg, orig | value);
+---
+> 	reg |= mask;
+> 	sun4i_spi_write(sspi, SUN4I_INT_CTL_REG, reg);
+271c121
+< static inline void sunxi_spi_unset(struct sunxi_spi *sspi, u32 reg, u32 value)
+---
+> static inline void sun4i_spi_disable_interrupt(struct sun4i_spi *sspi, u32 mask)
+273,276c123
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_unset);
+< #endif
+< 	u32 orig = sunxi_spi_read(sspi, reg);
+---
+> 	u32 reg = sun4i_spi_read(sspi, SUN4I_INT_CTL_REG);
+278c125,126
+< 	sunxi_spi_write(sspi, reg, orig & ~value);
+---
+> 	reg &= ~mask;
+> 	sun4i_spi_write(sspi, SUN4I_INT_CTL_REG, reg);
+281c129
+< static inline void sunxi_spi_drain_fifo(struct sunxi_spi *sspi, int len)
+---
+> static inline void sun4i_spi_drain_fifo(struct sun4i_spi *sspi, int len)
+287,293c135,138
+< 	reg = sunxi_spi_read(sspi, SUNXI_FIFO_STA_REG);
+< 	reg &= SUNXI_FIFO_STA_RF_CNT_MASK;
+< 	cnt = reg >> SUNXI_FIFO_STA_RF_CNT_BITS;
+< 
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_drain_fifo);
+< #endif
+---
+> 	reg = sun4i_spi_read(sspi, SUN4I_FIFO_STA_REG);
+> 	reg &= SUN4I_FIFO_STA_RF_CNT_MASK;
+> 	cnt = reg >> SUN4I_FIFO_STA_RF_CNT_BITS;
+> 
+298,299c143
+< 		byte = readb(sspi->base_addr +
+< 			     sspi_reg(sspi, SUNXI_RXDATA_REG));
+---
+> 		byte = readb(sspi->base_addr + SUN4I_RXDATA_REG);
+305c149
+< static inline void sunxi_spi_fill_fifo(struct sunxi_spi *sspi, int len)
+---
+> static inline void sun4i_spi_fill_fifo(struct sun4i_spi *sspi, int len)
+306a151
+> 	u32 cnt;
+309,313c154,157
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_fill_fifo);
+< #endif
+< 	if (len > sspi->len)
+< 		len = sspi->len;
+---
+> 	/* See how much data we can fit */
+> 	cnt = SUN4I_FIFO_DEPTH - sun4i_spi_get_tx_fifo_count(sspi);
+> 
+> 	len = min3(len, (int)cnt, sspi->len);
+317,318c161
+< 		writeb(byte, sspi->base_addr +
+< 		       sspi_reg(sspi, SUNXI_TXDATA_REG));
+---
+> 		writeb(byte, sspi->base_addr + SUN4I_TXDATA_REG);
+323,335c166
+< static bool sunxi_spi_can_dma(struct spi_master *master,
+< 			      struct spi_device *spi,
+< 			      struct spi_transfer *tfr)
+< {
+< 	struct sunxi_spi *sspi = spi_master_get_devdata(master);
+< 
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_can_dma);
+< #endif
+< 	return tfr->len > sspi->fifo_depth;
+< }
+< 
+< static void sunxi_spi_set_cs(struct spi_device *spi, bool enable)
+---
+> static void sun4i_spi_set_cs(struct spi_device *spi, bool enable)
+337c168
+< 	struct sunxi_spi *sspi = spi_master_get_devdata(spi->master);
+---
+> 	struct sun4i_spi *sspi = spi_master_get_devdata(spi->master);
+340,342c171,174
+< 	reg = sunxi_spi_read(sspi, SUNXI_TFR_CTL_REG);
+< 	reg &= ~sspi_bits(sspi, SUNXI_TFR_CTL_CS_MASK);
+< 	reg |= SUNXI_TFR_CTL_CS(*sspi->bitmap, spi->chip_select);
+---
+> 	reg = sun4i_spi_read(sspi, SUN4I_CTL_REG);
+> 
+> 	reg &= ~SUN4I_CTL_CS_MASK;
+> 	reg |= SUN4I_CTL_CS(spi->chip_select);
+345c177
+< 	reg |= sspi_bits(sspi, SUNXI_TFR_CTL_CS_MANUAL);
+---
+> 	reg |= SUN4I_CTL_CS_MANUAL;
+347,349d178
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_set_cs);
+< #endif
+351c180
+< 		reg |= sspi_bits(sspi, SUNXI_TFR_CTL_CS_LEVEL);
+---
+> 		reg |= SUN4I_CTL_CS_LEVEL;
+353c182
+< 		reg &= ~sspi_bits(sspi, SUNXI_TFR_CTL_CS_LEVEL);
+---
+> 		reg &= ~SUN4I_CTL_CS_LEVEL;
+367c196
+< 		reg &= ~sspi_bits(sspi, SUNXI_TFR_CTL_CS_ACTIVE_LOW);
+---
+> 		reg &= ~SUN4I_CTL_CS_ACTIVE_LOW;
+369c198
+< 		reg |= sspi_bits(sspi, SUNXI_TFR_CTL_CS_ACTIVE_LOW);
+---
+> 		reg |= SUN4I_CTL_CS_ACTIVE_LOW;
+371c200
+< 	sunxi_spi_write(sspi, SUNXI_TFR_CTL_REG, reg);
+---
+> 	sun4i_spi_write(sspi, SUN4I_CTL_REG, reg);
+374,387c203
+< static size_t sunxi_spi_max_transfer_size(struct spi_device *spi)
+< {
+< 	struct spi_master *master = spi->master;
+< 	struct sunxi_spi *sspi = spi_master_get_devdata(master);
+< 
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_max_transfer_size);
+< #endif
+< 	if (master->can_dma)
+< 		return SUNXI_CNT_MASK;
+< 	return sspi->fifo_depth;
+< }
+< 
+< static int sunxi_spi_transfer_one(struct spi_master *master,
+---
+> static int sun4i_spi_transfer_one(struct spi_master *master,
+391,393c207
+< 	struct sunxi_spi *sspi = spi_master_get_devdata(master);
+< 	struct dma_async_tx_descriptor *desc_tx = NULL, *desc_rx = NULL;
+< 	dma_cookie_t tx_cookie, rx_cookie;
+---
+> 	struct sun4i_spi *sspi = spi_master_get_devdata(master);
+398,411c212
+< 	u32 reg, trigger = 0;
+< 
+< 	/* A 0 length transfer never finishes if programmed in the hardware */
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_treansfer_one);
+< #endif
+< 	if (!tfr->len)
+< 		return 0;
+< 
+< 	if (!master->can_dma) {
+< 		/* We don't support transfer larger than the FIFO */
+< 		if (tfr->len > sspi->fifo_depth)
+< 			return -EMSGSIZE;
+< 	}
+---
+> 	u32 reg;
+413,414c214,216
+< 	if (tfr->len > SUNXI_CNT_MASK)
+< 		return -EMSGSIZE;
+---
+> 	/* This is the maximum SPI burst size supported by the hardware */
+> 	if (tfr->len >= SUN4I_MAX_XFER_SIZE)
+> 		return -EINVAL;
+422c224,225
+< 	sunxi_spi_write(sspi, SUNXI_INT_STA_REG, ~0);
+---
+> 	sun4i_spi_write(sspi, SUN4I_INT_STA_REG, ~0);
+> 
+424c227
+< 	reg = sunxi_spi_read(sspi, SUNXI_TFR_CTL_REG);
+---
+> 	reg = sun4i_spi_read(sspi, SUN4I_CTL_REG);
+427,434c230,231
+< 	if (sspi->type == SPI_SUN4I)
+< 		sunxi_spi_write(sspi, SUNXI_TFR_CTL_REG,
+< 				reg | sspi_bits(sspi, SUNXI_CTL_RF_RST) |
+< 				sspi_bits(sspi, SUNXI_CTL_TF_RST));
+< 	else
+< 		sunxi_spi_write(sspi, SUNXI_FIFO_CTL_REG,
+< 				sspi_bits(sspi, SUNXI_CTL_RF_RST) |
+< 				sspi_bits(sspi, SUNXI_CTL_TF_RST));
+---
+> 	sun4i_spi_write(sspi, SUN4I_CTL_REG,
+> 			reg | SUN4I_CTL_RF_RST | SUN4I_CTL_TF_RST);
+441c238
+< 		reg |= sspi_bits(sspi, SUNXI_TFR_CTL_CPOL);
+---
+> 		reg |= SUN4I_CTL_CPOL;
+443c240
+< 		reg &= ~sspi_bits(sspi, SUNXI_TFR_CTL_CPOL);
+---
+> 		reg &= ~SUN4I_CTL_CPOL;
+446c243
+< 		reg |= sspi_bits(sspi, SUNXI_TFR_CTL_CPHA);
+---
+> 		reg |= SUN4I_CTL_CPHA;
+448c245
+< 		reg &= ~sspi_bits(sspi, SUNXI_TFR_CTL_CPHA);
+---
+> 		reg &= ~SUN4I_CTL_CPHA;
+451c248
+< 		reg |= sspi_bits(sspi, SUNXI_TFR_CTL_FBS);
+---
+> 		reg |= SUN4I_CTL_LMTF;
+453c250,251
+< 		reg &= ~sspi_bits(sspi, SUNXI_TFR_CTL_FBS);
+---
+> 		reg &= ~SUN4I_CTL_LMTF;
+> 
+460c258
+< 		reg &= ~sspi_bits(sspi, SUNXI_TFR_CTL_DHB);
+---
+> 		reg &= ~SUN4I_CTL_DHB;
+462c260
+< 		reg |= sspi_bits(sspi, SUNXI_TFR_CTL_DHB);
+---
+> 		reg |= SUN4I_CTL_DHB;
+464c262
+< 	sunxi_spi_write(sspi, SUNXI_TFR_CTL_REG, reg);
+---
+> 	sun4i_spi_write(sspi, SUN4I_CTL_REG, reg);
+478c276
+< 	 * SPI_CLK = MOD_CLK / (2 ^ cdr)
+---
+> 	 * SPI_CLK = MOD_CLK / (2 ^ (cdr + 1))
+488c286
+< 	if (div <= (SUNXI_CLK_CTL_CDR2_MASK + 1)) {
+---
+> 	if (div <= (SUN4I_CLK_CTL_CDR2_MASK + 1)) {
+492c290
+< 		reg = SUNXI_CLK_CTL_CDR2(div) | SUNXI_CLK_CTL_DRS;
+---
+> 		reg = SUN4I_CLK_CTL_CDR2(div) | SUN4I_CLK_CTL_DRS;
+495c293
+< 		reg = SUNXI_CLK_CTL_CDR1(div);
+---
+> 		reg = SUN4I_CLK_CTL_CDR1(div);
+498c296
+< 	sunxi_spi_write(sspi, SUNXI_CLK_CTL_REG, reg);
+---
+> 	sun4i_spi_write(sspi, SUN4I_CLK_CTL_REG, reg);
+505,579c303,304
+< 	sunxi_spi_write(sspi, SUNXI_BURST_CNT_REG, SUNXI_BURST_CNT(tfr->len));
+< 	sunxi_spi_write(sspi, SUNXI_XMIT_CNT_REG, SUNXI_XMIT_CNT(tx_len));
+< 	if (sspi->type == SPI_SUN6I)
+< 		sunxi_spi_write(sspi, SUNXI_BURST_CTL_CNT_REG,
+< 				SUNXI_BURST_CTL_CNT_STC(tx_len));
+< 
+< 	/* Setup transfer buffers */
+< 	if (sunxi_spi_can_dma(master, spi, tfr)) {
+< #if MY_DMA_DEBUG
+< 		DEBUG_ME(DMA_ENABLED_TRANSFER);
+< #endif
+< 		dev_dbg(&sspi->master->dev, "Using DMA mode for transfer\n");
+< 
+< 		if (sspi->tx_buf) {
+< 			desc_tx = dmaengine_prep_slave_sg(master->dma_tx,
+< 					tfr->tx_sg.sgl, tfr->tx_sg.nents,
+< 					DMA_TO_DEVICE,
+< 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+< 			if (!desc_tx) {
+< 				dev_err(&sspi->master->dev,
+< 					"Couldn't prepare dma slave\n");
+< 				ret = -EIO;
+< 				goto out;
+< 			}
+< 
+< 			if (sspi->type == SPI_SUN4I)
+< 				trigger |= sspi_bits(sspi, SUNXI_CTL_DMA_TF_NOT_FULL);
+< 			else
+< 				trigger |= sspi_bits(sspi, SUNXI_CTL_DMA_TF_HALF);
+< 
+< 			tx_cookie = dmaengine_submit(desc_tx);
+< 			dma_async_issue_pending(master->dma_tx);
+< 		}
+< 
+< 		if (sspi->rx_buf) {
+< 			desc_rx = dmaengine_prep_slave_sg(master->dma_rx,
+< 					tfr->rx_sg.sgl, tfr->rx_sg.nents,
+< 					DMA_FROM_DEVICE,
+< 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+< 			if (!desc_rx) {
+< 				dev_err(&sspi->master->dev,
+< 					"Couldn't prepare dma slave\n");
+< 				ret = -EIO;
+< 				goto out;
+< 			}
+< 
+< 			trigger |= sspi_bits(sspi, SUNXI_CTL_DMA_RF_READY);
+< 
+< 			rx_cookie = dmaengine_submit(desc_rx);
+< 			dma_async_issue_pending(master->dma_rx);
+< 		}
+< 
+< 		/* Enable Dedicated DMA requests */
+< 		if (sspi->type == SPI_SUN4I) {
+< 			sunxi_spi_set(sspi, SUNXI_TFR_CTL_REG,
+< 				      sspi_bits(sspi, SUNXI_CTL_DMA_DEDICATED));
+< 			sunxi_spi_write(sspi, SUNXI_DMA_CTL_REG, trigger);
+< 		} else {
+< 			trigger |= sspi_bits(sspi, SUNXI_CTL_DMA_DEDICATED);
+< 			sunxi_spi_write(sspi, SUNXI_FIFO_CTL_REG, trigger);
+< 		}
+< 	} else {
+< #if MY_DMA_DEBUG
+< 		DEBUG_ME(DMA_DISSABLED_MODE);
+< #endif
+< 		dev_dbg(&sspi->master->dev, "Using PIO mode for transfer\n");
+< 
+< 		/* Disable DMA requests */
+< 		if (sspi->type == SPI_SUN4I) {
+< 			sunxi_spi_unset(sspi, SUNXI_TFR_CTL_REG,
+< 					sspi_bits(sspi, SUNXI_CTL_DMA_DEDICATED));
+< 			sunxi_spi_write(sspi, SUNXI_DMA_CTL_REG, 0);
+< 		} else {
+< 			sunxi_spi_write(sspi, SUNXI_FIFO_CTL_REG, 0);
+< 		}
+---
+> 	sun4i_spi_write(sspi, SUN4I_BURST_CNT_REG, SUN4I_BURST_CNT(tfr->len));
+> 	sun4i_spi_write(sspi, SUN4I_XMIT_CNT_REG, SUN4I_XMIT_CNT(tx_len));
+581,583c306,311
+< 		/* Fill the TX FIFO */
+< 		sunxi_spi_fill_fifo(sspi, sspi->fifo_depth);
+< 	}
+---
+> 	/*
+> 	 * Fill the TX FIFO
+> 	 * Filling the FIFO fully causes timeout for some reason
+> 	 * at least on spi2 on A10s
+> 	 */
+> 	sun4i_spi_fill_fifo(sspi, SUN4I_FIFO_DEPTH - 1);
+586,587c314,318
+< 	sunxi_spi_write(sspi, SUNXI_INT_CTL_REG,
+< 			sspi_bits(sspi, SUNXI_INT_CTL_TC));
+---
+> 	sun4i_spi_enable_interrupt(sspi, SUN4I_INT_CTL_TC |
+> 					 SUN4I_INT_CTL_RF_F34);
+> 	/* Only enable Tx FIFO interrupt if we really need it */
+> 	if (tx_len > SUN4I_FIFO_DEPTH)
+> 		sun4i_spi_enable_interrupt(sspi, SUN4I_INT_CTL_TF_E34);
+590,591c321,322
+< 	sunxi_spi_set(sspi, SUNXI_TFR_CTL_REG,
+< 			    sspi_bits(sspi, SUNXI_TFR_CTL_XCH));
+---
+> 	reg = sun4i_spi_read(sspi, SUN4I_CTL_REG);
+> 	sun4i_spi_write(sspi, SUN4I_CTL_REG, reg | SUN4I_CTL_XCH);
+606,609d336
+< 	if (desc_tx && dma_async_is_tx_complete(master->dma_tx, tx_cookie, NULL, NULL))
+< 		dev_warn(&master->dev, "TX DMA active after completion signalled!");
+< 	if (desc_rx && dma_async_is_tx_complete(master->dma_rx, rx_cookie, NULL, NULL))
+< 		dev_warn(&master->dev, "RX DMA active after completion signalled!");
+612,628c339
+< 	if (ret < 0 && sunxi_spi_can_dma(master, spi, tfr)) {
+< 		dev_dbg(&master->dev, "DMA channel teardown");
+< 		if (sspi->tx_buf)
+< 			dmaengine_terminate_all(master->dma_tx);
+< 		if (sspi->rx_buf)
+< 			dmaengine_terminate_all(master->dma_rx);
+< 	}
+< 
+< 	/*
+< 	 * By this time either the transfer has ended and we have data in the
+< 	 * FIFO buffer from a PIO RX transfer or the buffer is empty
+< 	 * or something has failed.
+< 	 * Empty the buffer either way to avoid leaving garbage around.
+< 	 */
+< 	sunxi_spi_drain_fifo(sspi, sspi->fifo_depth);
+< 
+< 	sunxi_spi_write(sspi, SUNXI_INT_CTL_REG, 0);
+---
+> 	sun4i_spi_write(sspi, SUN4I_INT_CTL_REG, 0);
+633c344
+< static irqreturn_t sunxi_spi_handler(int irq, void *dev_id)
+---
+> static irqreturn_t sun4i_spi_handler(int irq, void *dev_id)
+635,636c346,347
+< 	struct sunxi_spi *sspi = dev_id;
+< 	u32 status = sunxi_spi_read(sspi, SUNXI_INT_STA_REG);
+---
+> 	struct sun4i_spi *sspi = dev_id;
+> 	u32 status = sun4i_spi_read(sspi, SUN4I_INT_STA_REG);
+639,644c350,352
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_handler);
+< #endif
+< 	if (status & sspi_bits(sspi, SUNXI_INT_CTL_TC)) {
+< 		sunxi_spi_write(sspi, SUNXI_INT_STA_REG,
+< 				sspi_bits(sspi, SUNXI_INT_CTL_TC));
+---
+> 	if (status & SUN4I_INT_CTL_TC) {
+> 		sun4i_spi_write(sspi, SUN4I_INT_STA_REG, SUN4I_INT_CTL_TC);
+> 		sun4i_spi_drain_fifo(sspi, SUN4I_FIFO_DEPTH);
+648a357,378
+> 	/* Receive FIFO 3/4 full */
+> 	if (status & SUN4I_INT_CTL_RF_F34) {
+> 		sun4i_spi_drain_fifo(sspi, SUN4I_FIFO_DEPTH);
+> 		/* Only clear the interrupt _after_ draining the FIFO */
+> 		sun4i_spi_write(sspi, SUN4I_INT_STA_REG, SUN4I_INT_CTL_RF_F34);
+> 		return IRQ_HANDLED;
+> 	}
+> 
+> 	/* Transmit FIFO 3/4 empty */
+> 	if (status & SUN4I_INT_CTL_TF_E34) {
+> 		sun4i_spi_fill_fifo(sspi, SUN4I_FIFO_DEPTH);
+> 
+> 		if (!sspi->len)
+> 			/* nothing left to transmit */
+> 			sun4i_spi_disable_interrupt(sspi, SUN4I_INT_CTL_TF_E34);
+> 
+> 		/* Only clear the interrupt _after_ re-seeding the FIFO */
+> 		sun4i_spi_write(sspi, SUN4I_INT_STA_REG, SUN4I_INT_CTL_TF_E34);
+> 
+> 		return IRQ_HANDLED;
+> 	}
+> 
+652c382
+< static int sunxi_spi_runtime_resume(struct device *dev)
+---
+> static int sun4i_spi_runtime_resume(struct device *dev)
+655,656c385,386
+< 	struct sunxi_spi *sspi = spi_master_get_devdata(master);
+< 	int ret, reg;
+---
+> 	struct sun4i_spi *sspi = spi_master_get_devdata(master);
+> 	int ret;
+659,661d388
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_runtime_resume);
+< #endif
+673,688c400,401
+< 	if (sspi->rstc) {
+< 		ret = reset_control_deassert(sspi->rstc);
+< 		if (ret) {
+< 			dev_err(dev, "Couldn't deassert the device from reset\n");
+< 			goto err2;
+< 		}
+< 	}
+< 
+< 	if (sspi->type == SPI_SUN4I)
+< 		reg = SUNXI_TFR_CTL_REG;
+< 	else
+< 		reg = SUNXI_GBL_CTL_REG;
+< 	sunxi_spi_write(sspi, reg,
+< 			sspi_bits(sspi, SUNXI_CTL_ENABLE) |
+< 			sspi_bits(sspi, SUNXI_CTL_MASTER) |
+< 			sspi_bits(sspi, SUNXI_CTL_TP));
+---
+> 	sun4i_spi_write(sspi, SUN4I_CTL_REG,
+> 			SUN4I_CTL_ENABLE | SUN4I_CTL_MASTER | SUN4I_CTL_TP);
+692,693d404
+< err2:
+< 	clk_disable_unprepare(sspi->mclk);
+700c411
+< static int sunxi_spi_runtime_suspend(struct device *dev)
+---
+> static int sun4i_spi_runtime_suspend(struct device *dev)
+703c414
+< 	struct sunxi_spi *sspi = spi_master_get_devdata(master);
+---
+> 	struct sun4i_spi *sspi = spi_master_get_devdata(master);
+705,709d415
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_runtime_suspend);
+< #endif
+< 	if (sspi->rstc)
+< 		reset_control_assert(sspi->rstc);
+716,718c422
+< static const struct of_device_id sunxi_spi_match[];
+< 
+< static int sunxi_spi_probe(struct platform_device *pdev)
+---
+> static int sun4i_spi_probe(struct platform_device *pdev)
+720,721d423
+< 	const struct of_device_id *id_entry;
+< 	struct dma_slave_config dma_sconfig;
+723c425
+< 	struct sunxi_spi *sspi;
+---
+> 	struct sun4i_spi *sspi;
+726,734d427
+< 	const char *desc = NULL;
+< 
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_probe);
+< #endif
+< 	if (!pdev->dev.of_node) {
+< 		dev_err(&pdev->dev, "No devicetree data.\n");
+< 		return -EINVAL;
+< 	}
+736,742c429
+< 	id_entry = of_match_node(sunxi_spi_match, pdev->dev.of_node);
+< 	if (!id_entry) {
+< 		dev_err(&pdev->dev, "Failed to match dt node.\n");
+< 		return -EINVAL;
+< 	}
+< 
+< 	master = spi_alloc_master(&pdev->dev, sizeof(struct sunxi_spi));
+---
+> 	master = spi_alloc_master(&pdev->dev, sizeof(struct sun4i_spi));
+765,766c452,453
+< 	ret = devm_request_irq(&pdev->dev, irq, sunxi_spi_handler,
+< 			       0, "sunxi-spi", sspi);
+---
+> 	ret = devm_request_irq(&pdev->dev, irq, sun4i_spi_handler,
+> 			       0, "sun4i-spi", sspi);
+773,794c460,461
+< 	sspi->type = (int) id_entry->data;
+< 	switch (sspi->type) {
+< 	case SPI_SUN4I:
+< 		sspi->fifo_depth = SUN4I_FIFO_DEPTH;
+< 		sspi->regmap = &sun4i_regmap;
+< 		sspi->bitmap = &sun4i_bitmap;
+< 		break;
+< 	case SPI_SUN6I:
+< 		sspi->fifo_depth = SUN6I_FIFO_DEPTH;
+< 		sspi->regmap = &sun6i_regmap;
+< 		sspi->bitmap = &sun6i_bitmap;
+< 		break;
+< 	default:
+< 		dev_err(&pdev->dev, "Unknown sunxi spi type %i", sspi->type);
+< 		ret = -EINVAL;
+< 		goto err_free_master;
+< 	}
+< 
+< 	master->max_speed_hz = 100 * 1000 * 1000;
+< 	master->min_speed_hz = 3 * 1000;
+< 	master->set_cs = sunxi_spi_set_cs;
+< 	master->transfer_one = sunxi_spi_transfer_one;
+---
+> 	master->set_cs = sun4i_spi_set_cs;
+> 	master->transfer_one = sun4i_spi_transfer_one;
+800d466
+< 	/*master->max_transfer_size = sunxi_spi_max_transfer_size;*/
+818,874d483
+< 	if (sspi->type == SPI_SUN6I) {
+< 		sspi->rstc = devm_reset_control_get(&pdev->dev, NULL);
+< 		if (IS_ERR(sspi->rstc)) {
+< 			dev_err(&pdev->dev, "Couldn't get reset controller\n");
+< 			ret = PTR_ERR(sspi->rstc);
+< 			goto err_free_master;
+< 		}
+< 	}
+< 
+< 	master->dma_tx = dma_request_slave_channel_reason(&pdev->dev, "tx");
+< 	if (IS_ERR(master->dma_tx)) {
+< 		dev_err(&pdev->dev, "Unable to acquire DMA channel TX\n");
+< 		ret = PTR_ERR(master->dma_tx);
+< 		goto err_dma_chan;
+< 	}
+< 
+< 	dma_sconfig.direction = DMA_MEM_TO_DEV;
+< 	dma_sconfig.src_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+< 	dma_sconfig.dst_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+< 	dma_sconfig.dst_addr = res->start + sspi_reg(sspi, SUNXI_TXDATA_REG);
+< 	dma_sconfig.src_maxburst = 1;
+< 	dma_sconfig.dst_maxburst = 1;
+< 
+< 	ret = dmaengine_slave_config(master->dma_tx, &dma_sconfig);
+< 	if (ret) {
+< 		dev_err(&pdev->dev, "Unable to configure TX DMA slave\n");
+< 		goto err_tx_dma_release;
+< 	}
+< 
+< 	master->dma_rx = dma_request_slave_channel_reason(&pdev->dev, "rx");
+< 	if (IS_ERR(master->dma_rx)) {
+< 		dev_err(&pdev->dev, "Unable to acquire DMA channel RX\n");
+< 		ret = PTR_ERR(master->dma_rx);
+< 		goto err_tx_dma_release;
+< 	}
+< 
+< 	dma_sconfig.direction = DMA_DEV_TO_MEM;
+< 	dma_sconfig.src_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+< 	dma_sconfig.dst_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+< 	dma_sconfig.src_addr = res->start + sspi_reg(sspi, SUNXI_RXDATA_REG);
+< 	dma_sconfig.src_maxburst = 1;
+< 	dma_sconfig.dst_maxburst = 1;
+< 
+< 	ret = dmaengine_slave_config(master->dma_rx, &dma_sconfig);
+< 	if (ret) {
+< 		dev_err(&pdev->dev, "Unable to configure RX DMA slave\n");
+< 		goto err_rx_dma_release;
+< 	}
+< 
+< 	/*
+< 	 * This is a bit dodgy. If you set can_dma then map_msg in spi.c
+< 	 * apparently dereferences your dma channels if non-NULL even if your
+< 	 * can_dma never returns true (and crashes if the channel is an error
+< 	 * pointer). So just don't set can_dma unless both channels are valid.
+< 	 */
+< 	master->can_dma = sunxi_spi_can_dma;
+< wakeup:
+879c488
+< 	ret = sunxi_spi_runtime_resume(&pdev->dev);
+---
+> 	ret = sun4i_spi_runtime_resume(&pdev->dev);
+895,906d503
+< 	switch (sspi->type) {
+< 	case SPI_SUN4I:
+< 		desc = "sun4i";
+< 		break;
+< 	case SPI_SUN6I:
+< 		desc = "sun6i";
+< 		break;
+< 	}
+< 	dev_notice(&pdev->dev,
+< 		   "%s SPI controller at 0x%08x, IRQ %i, %i bytes FIFO",
+< 		   desc, res->start, irq, sspi->fifo_depth);
+< 
+909,919d505
+< err_rx_dma_release:
+< 	dma_release_channel(master->dma_rx);
+< err_tx_dma_release:
+< 	dma_release_channel(master->dma_tx);
+< err_dma_chan:
+< 	master->dma_tx = NULL;
+< 	master->dma_rx = NULL;
+< 	if ((ret == -EPROBE_DEFER) && wait_for_dma)
+< 		goto err_free_master;
+< 	goto wakeup;
+< 
+922c508
+< 	sunxi_spi_runtime_suspend(&pdev->dev);
+---
+> 	sun4i_spi_runtime_suspend(&pdev->dev);
+924,927d509
+< 	if (master->can_dma) {
+< 		dma_release_channel(master->dma_rx);
+< 		dma_release_channel(master->dma_tx);
+< 	}
+932c514
+< static int sunxi_spi_remove(struct platform_device *pdev)
+---
+> static int sun4i_spi_remove(struct platform_device *pdev)
+934,938d515
+< 	struct spi_master *master = platform_get_drvdata(pdev);
+< 
+< #if MY_DEBUG
+<     DEBUG_ME(sunxi_spi_remove);
+< #endif
+941,945d517
+< 	if (master->can_dma) {
+< 		dma_release_channel(master->dma_rx);
+< 		dma_release_channel(master->dma_tx);
+< 	}
+< 
+949,951c521,522
+< static const struct of_device_id sunxi_spi_match[] = {
+< 	{ .compatible = "allwinner,sun4i-a10-spi", .data = (void *)SPI_SUN4I },
+< 	{ .compatible = "allwinner,sun6i-a31-spi", .data = (void *)SPI_SUN6I },
+---
+> static const struct of_device_id sun4i_spi_match[] = {
+> 	{ .compatible = "allwinner,sun4i-a10-spi", },
+954c525
+< MODULE_DEVICE_TABLE(of, sunxi_spi_match);
+---
+> MODULE_DEVICE_TABLE(of, sun4i_spi_match);
+956,958c527,529
+< static const struct dev_pm_ops sunxi_spi_pm_ops = {
+< 	.runtime_resume		= sunxi_spi_runtime_resume,
+< 	.runtime_suspend	= sunxi_spi_runtime_suspend,
+---
+> static const struct dev_pm_ops sun4i_spi_pm_ops = {
+> 	.runtime_resume		= sun4i_spi_runtime_resume,
+> 	.runtime_suspend	= sun4i_spi_runtime_suspend,
+961,963c532,534
+< static struct platform_driver sunxi_spi_driver = {
+< 	.probe	= sunxi_spi_probe,
+< 	.remove	= sunxi_spi_remove,
+---
+> static struct platform_driver sun4i_spi_driver = {
+> 	.probe	= sun4i_spi_probe,
+> 	.remove	= sun4i_spi_remove,
+965,967c536,538
+< 		.name		= "sunxi-spi",
+< 		.of_match_table	= sunxi_spi_match,
+< 		.pm		= &sunxi_spi_pm_ops,
+---
+> 		.name		= "sun4i-spi",
+> 		.of_match_table	= sun4i_spi_match,
+> 		.pm		= &sun4i_spi_pm_ops,
+970c541
+< module_platform_driver(sunxi_spi_driver);
+---
+> module_platform_driver(sun4i_spi_driver);
+974c545
+< MODULE_DESCRIPTION("Allwinner A1X/A2X/A31 SPI controller driver");
+---
+> MODULE_DESCRIPTION("Allwinner A1X/A20 SPI controller driver");
